@@ -1,6 +1,6 @@
 // Proyecto 2 - Terminal Unix
 // Sistema de archivos simulado
-// agregue guardar y cargar desde archivo
+// agregue comando mv para mover y renombrar
 
 #include <iostream>
 #include <string>
@@ -188,81 +188,62 @@ NodoABB* buscarPorRuta(SistemaArchivos& sistema, const string& ruta) {
     return buscarEnABB(dirPadre->hijoRaiz, nombreFinal);
 }
 
-// guardar un nodo y sus hijos en el archivo
 void guardarNodoRecursivo(FILE* archivo, NodoABB* nodo, const string& rutaBase) {
     if (nodo == NULL) return;
-    
     string rutaCompleta = rutaBase;
     if (rutaBase != "/") rutaCompleta += "/";
     rutaCompleta += nodo->nombre;
-    
     if (nodo->esDirectorio) {
         fprintf(archivo, "DIR|%s|\n", rutaCompleta.c_str());
         guardarNodoRecursivo(archivo, nodo->hijoRaiz, rutaCompleta);
     } else {
         fprintf(archivo, "FILE|%s|%s\n", rutaCompleta.c_str(), nodo->contenido.c_str());
     }
-    
     guardarNodoRecursivo(archivo, nodo->izquierdo, rutaBase);
     guardarNodoRecursivo(archivo, nodo->derecho, rutaBase);
 }
 
-// guardar todo el sistema en archivo
 void guardarEnArchivo(SistemaArchivos& sistema) {
     FILE* archivo = fopen(sistema.archivoPersistencia.c_str(), "w");
     if (archivo == NULL) {
         cout << "error al guardar" << endl;
         return;
     }
-    
     if (sistema.raiz->hijoRaiz != NULL) {
         guardarNodoRecursivo(archivo, sistema.raiz->hijoRaiz, "/");
     }
-    
     fclose(archivo);
 }
 
-// cargar sistema desde archivo
 void cargarDesdeArchivo(SistemaArchivos& sistema) {
     FILE* archivo = fopen(sistema.archivoPersistencia.c_str(), "r");
     if (archivo == NULL) {
         return;
     }
-    
     char linea[1000];
     while (fgets(linea, sizeof(linea), archivo)) {
         linea[strcspn(linea, "\n")] = 0;
-        
         if (strlen(linea) == 0) continue;
-        
         char* tipo = strtok(linea, "|");
         char* ruta = strtok(NULL, "|");
         char* contenido = strtok(NULL, "|");
-        
         if (tipo == NULL || ruta == NULL) continue;
-        
         string rutaStr(ruta);
         string contenidoStr = (contenido != NULL) ? string(contenido) : "";
         bool esDir = (strcmp(tipo, "DIR") == 0);
-        
         size_t ultimaBarra = rutaStr.find_last_of('/');
         if (ultimaBarra == string::npos) continue;
-        
         string rutaPadre = rutaStr.substr(0, ultimaBarra);
         string nombreFinal = rutaStr.substr(ultimaBarra + 1);
-        
         if (rutaPadre.length() == 0) rutaPadre = "/";
-        
         NodoABB* padre = navegarRuta(sistema, rutaPadre);
         if (padre == NULL) continue;
-        
         if (buscarEnABB(padre->hijoRaiz, nombreFinal) == NULL) {
             NodoABB* nuevo = crearNodo(nombreFinal, esDir, contenidoStr);
             nuevo->padre = padre;
             padre->hijoRaiz = insertarEnABB(padre->hijoRaiz, nuevo);
         }
     }
-    
     fclose(archivo);
 }
 
@@ -355,14 +336,60 @@ void comandoTouch(SistemaArchivos& sistema, const string& ruta) {
     dirPadre->hijoRaiz = insertarEnABB(dirPadre->hijoRaiz, nuevoArchivo);
 }
 
+// comando mv para mover o renombrar archivos y carpetas
+void comandoMv(SistemaArchivos& sistema, const string& origen, const string& destino) {
+    NodoABB* nodoOrigen = buscarPorRuta(sistema, origen);
+    if (nodoOrigen == NULL) {
+        cout << "mv: no existe " << origen << endl;
+        return;
+    }
+    
+    NodoABB* padreOrigen = nodoOrigen->padre;
+    
+    string rutaPadreDestino, nombreDestino;
+    separarRuta(destino, rutaPadreDestino, nombreDestino);
+    
+    NodoABB* padreDestino;
+    if (rutaPadreDestino.length() == 0) {
+        padreDestino = sistema.actual;
+    } else {
+        padreDestino = navegarRuta(sistema, rutaPadreDestino);
+    }
+    
+    if (padreDestino == NULL) {
+        cout << "mv: ruta destino no existe" << endl;
+        return;
+    }
+    
+    if (buscarEnABB(padreDestino->hijoRaiz, nombreDestino) != NULL) {
+        cout << "mv: ya existe " << nombreDestino << endl;
+        return;
+    }
+    
+    // si es el mismo directorio solo renombrar
+    if (padreOrigen == padreDestino) {
+        nodoOrigen->nombre = nombreDestino;
+    } else {
+        // mover a otro directorio
+        string nombreViejo = nodoOrigen->nombre;
+        
+        NodoABB* nodoMovido = NULL;
+        padreOrigen->hijoRaiz = quitarDeABB(padreOrigen->hijoRaiz, nombreViejo, nodoMovido);
+        
+        if (nodoMovido != NULL) {
+            nodoMovido->nombre = nombreDestino;
+            nodoMovido->padre = padreDestino;
+            padreDestino->hijoRaiz = insertarEnABB(padreDestino->hijoRaiz, nodoMovido);
+        }
+    }
+}
+
 int main() {
     SistemaArchivos sistema;
     inicializarSistema(sistema, "filesystem.txt");
-    
-    // cargar datos guardados
     cargarDesdeArchivo(sistema);
     
-    string comando, parametro1;
+    string comando, parametro1, parametro2;
     
     while (true) {
         cout << obtenerRutaCompleta(sistema.actual) << "$ ";
@@ -392,6 +419,10 @@ int main() {
         else if (comando == "touch") {
             cin >> parametro1;
             comandoTouch(sistema, parametro1);
+        }
+        else if (comando == "mv") {
+            cin >> parametro1 >> parametro2;
+            comandoMv(sistema, parametro1, parametro2);
         }
         else {
             cout << "comando no encontrado" << endl;
