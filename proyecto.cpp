@@ -1,9 +1,11 @@
 // Proyecto 2 - Terminal Unix
 // Sistema de archivos simulado
-// agregue comandos ls y cd
+// agregue guardar y cargar desde archivo
 
 #include <iostream>
 #include <string>
+#include <cstdio>
+#include <cstring>
 
 using namespace std;
 
@@ -125,26 +127,20 @@ string obtenerRutaCompleta(NodoABB* nodo) {
     return ruta;
 }
 
-// navegar por una ruta
 NodoABB* navegarRuta(SistemaArchivos& sistema, const string& ruta) {
     if (ruta == "/") {
         return sistema.raiz;
     }
-    
     NodoABB* actual = (ruta[0] == '/') ? sistema.raiz : sistema.actual;
-    
     string rutaTrabajo = ruta;
     if (rutaTrabajo[0] == '/') {
         rutaTrabajo = rutaTrabajo.substr(1);
     }
-    
     size_t inicio = 0;
     size_t fin = 0;
-    
     while (fin != string::npos) {
         fin = rutaTrabajo.find('/', inicio);
         string componente = rutaTrabajo.substr(inicio, fin - inicio);
-        
         if (componente.length() > 0) {
             if (componente == "..") {
                 if (actual->padre != NULL) {
@@ -163,7 +159,6 @@ NodoABB* navegarRuta(SistemaArchivos& sistema, const string& ruta) {
     return actual;
 }
 
-// separar ruta en padre y nombre
 void separarRuta(const string& ruta, string& rutaPadre, string& nombreFinal) {
     size_t pos = ruta.find_last_of('/');
     if (pos == string::npos) {
@@ -178,22 +173,97 @@ void separarRuta(const string& ruta, string& rutaPadre, string& nombreFinal) {
     }
 }
 
-// buscar nodo por ruta completa
 NodoABB* buscarPorRuta(SistemaArchivos& sistema, const string& ruta) {
     string rutaPadre, nombreFinal;
     separarRuta(ruta, rutaPadre, nombreFinal);
-    
     NodoABB* dirPadre;
     if (rutaPadre.length() == 0) {
         dirPadre = sistema.actual;
     } else {
         dirPadre = navegarRuta(sistema, rutaPadre);
     }
-    
     if (dirPadre == NULL) {
         return NULL;
     }
     return buscarEnABB(dirPadre->hijoRaiz, nombreFinal);
+}
+
+// guardar un nodo y sus hijos en el archivo
+void guardarNodoRecursivo(FILE* archivo, NodoABB* nodo, const string& rutaBase) {
+    if (nodo == NULL) return;
+    
+    string rutaCompleta = rutaBase;
+    if (rutaBase != "/") rutaCompleta += "/";
+    rutaCompleta += nodo->nombre;
+    
+    if (nodo->esDirectorio) {
+        fprintf(archivo, "DIR|%s|\n", rutaCompleta.c_str());
+        guardarNodoRecursivo(archivo, nodo->hijoRaiz, rutaCompleta);
+    } else {
+        fprintf(archivo, "FILE|%s|%s\n", rutaCompleta.c_str(), nodo->contenido.c_str());
+    }
+    
+    guardarNodoRecursivo(archivo, nodo->izquierdo, rutaBase);
+    guardarNodoRecursivo(archivo, nodo->derecho, rutaBase);
+}
+
+// guardar todo el sistema en archivo
+void guardarEnArchivo(SistemaArchivos& sistema) {
+    FILE* archivo = fopen(sistema.archivoPersistencia.c_str(), "w");
+    if (archivo == NULL) {
+        cout << "error al guardar" << endl;
+        return;
+    }
+    
+    if (sistema.raiz->hijoRaiz != NULL) {
+        guardarNodoRecursivo(archivo, sistema.raiz->hijoRaiz, "/");
+    }
+    
+    fclose(archivo);
+}
+
+// cargar sistema desde archivo
+void cargarDesdeArchivo(SistemaArchivos& sistema) {
+    FILE* archivo = fopen(sistema.archivoPersistencia.c_str(), "r");
+    if (archivo == NULL) {
+        return;
+    }
+    
+    char linea[1000];
+    while (fgets(linea, sizeof(linea), archivo)) {
+        linea[strcspn(linea, "\n")] = 0;
+        
+        if (strlen(linea) == 0) continue;
+        
+        char* tipo = strtok(linea, "|");
+        char* ruta = strtok(NULL, "|");
+        char* contenido = strtok(NULL, "|");
+        
+        if (tipo == NULL || ruta == NULL) continue;
+        
+        string rutaStr(ruta);
+        string contenidoStr = (contenido != NULL) ? string(contenido) : "";
+        bool esDir = (strcmp(tipo, "DIR") == 0);
+        
+        size_t ultimaBarra = rutaStr.find_last_of('/');
+        if (ultimaBarra == string::npos) continue;
+        
+        string rutaPadre = rutaStr.substr(0, ultimaBarra);
+        string nombreFinal = rutaStr.substr(ultimaBarra + 1);
+        
+        if (rutaPadre.length() == 0) rutaPadre = "/";
+        
+        NodoABB* padre = navegarRuta(sistema, rutaPadre);
+        if (padre == NULL) continue;
+        
+        if (buscarEnABB(padre->hijoRaiz, nombreFinal) == NULL) {
+            NodoABB* nuevo = crearNodo(nombreFinal, esDir, contenidoStr);
+            nuevo->padre = padre;
+            padre->hijoRaiz = insertarEnABB(padre->hijoRaiz, nuevo);
+        }
+    }
+    
+    fclose(archivo);
 }
 
 void inicializarSistema(SistemaArchivos& sistema, const string& archivoConfig) {
@@ -202,10 +272,8 @@ void inicializarSistema(SistemaArchivos& sistema, const string& archivoConfig) {
     sistema.actual = sistema.raiz;
 }
 
-// comando ls
 void comandoLs(SistemaArchivos& sistema, const string& ruta) {
     NodoABB* dir;
-    
     if (ruta.length() == 0) {
         dir = sistema.actual;
     } else {
@@ -220,17 +288,14 @@ void comandoLs(SistemaArchivos& sistema, const string& ruta) {
             return;
         }
     }
-    
     if (dir->hijoRaiz == NULL) {
         return;
     }
     listarInorden(dir->hijoRaiz);
 }
 
-// comando cd
 void comandoCd(SistemaArchivos& sistema, const string& ruta) {
     NodoABB* destino = navegarRuta(sistema, ruta);
-    
     if (destino == NULL) {
         cout << "cd: no se encontro " << ruta << endl;
         return;
@@ -238,9 +303,64 @@ void comandoCd(SistemaArchivos& sistema, const string& ruta) {
     sistema.actual = destino;
 }
 
+void comandoMkdir(SistemaArchivos& sistema, const string& ruta) {
+    string rutaPadre, nombreCarpeta;
+    separarRuta(ruta, rutaPadre, nombreCarpeta);
+    if (nombreCarpeta.length() == 0) {
+        cout << "mkdir: falta el nombre" << endl;
+        return;
+    }
+    NodoABB* dirPadre;
+    if (rutaPadre.length() == 0) {
+        dirPadre = sistema.actual;
+    } else {
+        dirPadre = navegarRuta(sistema, rutaPadre);
+    }
+    if (dirPadre == NULL) {
+        cout << "mkdir: ruta no existe" << endl;
+        return;
+    }
+    if (buscarEnABB(dirPadre->hijoRaiz, nombreCarpeta) != NULL) {
+        cout << "mkdir: ya existe " << nombreCarpeta << endl;
+        return;
+    }
+    NodoABB* nuevaCarpeta = crearNodo(nombreCarpeta, true);
+    nuevaCarpeta->padre = dirPadre;
+    dirPadre->hijoRaiz = insertarEnABB(dirPadre->hijoRaiz, nuevaCarpeta);
+}
+
+void comandoTouch(SistemaArchivos& sistema, const string& ruta) {
+    string rutaPadre, nombreArchivo;
+    separarRuta(ruta, rutaPadre, nombreArchivo);
+    if (nombreArchivo.length() == 0) {
+        cout << "touch: falta el nombre" << endl;
+        return;
+    }
+    NodoABB* dirPadre;
+    if (rutaPadre.length() == 0) {
+        dirPadre = sistema.actual;
+    } else {
+        dirPadre = navegarRuta(sistema, rutaPadre);
+    }
+    if (dirPadre == NULL) {
+        cout << "touch: ruta no existe" << endl;
+        return;
+    }
+    if (buscarEnABB(dirPadre->hijoRaiz, nombreArchivo) != NULL) {
+        cout << "touch: ya existe " << nombreArchivo << endl;
+        return;
+    }
+    NodoABB* nuevoArchivo = crearNodo(nombreArchivo, false);
+    nuevoArchivo->padre = dirPadre;
+    dirPadre->hijoRaiz = insertarEnABB(dirPadre->hijoRaiz, nuevoArchivo);
+}
+
 int main() {
     SistemaArchivos sistema;
     inicializarSistema(sistema, "filesystem.txt");
+    
+    // cargar datos guardados
+    cargarDesdeArchivo(sistema);
     
     string comando, parametro1;
     
@@ -249,6 +369,7 @@ int main() {
         cin >> comando;
         
         if (comando == "exit") {
+            guardarEnArchivo(sistema);
             break;
         }
         else if (comando == "ls") {
@@ -263,6 +384,14 @@ int main() {
         else if (comando == "cd") {
             cin >> parametro1;
             comandoCd(sistema, parametro1);
+        }
+        else if (comando == "mkdir") {
+            cin >> parametro1;
+            comandoMkdir(sistema, parametro1);
+        }
+        else if (comando == "touch") {
+            cin >> parametro1;
+            comandoTouch(sistema, parametro1);
         }
         else {
             cout << "comando no encontrado" << endl;
