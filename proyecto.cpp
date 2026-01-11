@@ -1,5 +1,6 @@
 // Proyecto 2 - Terminal Unix
 // Sistema de archivos simulado
+// agregue funcion para eliminar del abb
 
 #include <iostream>
 #include <string>
@@ -63,6 +64,61 @@ NodoABB* buscarEnABB(NodoABB* raiz, const string& nombre) {
     } else {
         return buscarEnABB(raiz->derecho, nombre);
     }
+}
+
+// quitar nodo del abb sin borrarlo para poder moverlo
+NodoABB* quitarDeABB(NodoABB* raiz, const string& nombre, NodoABB*& nodoQuitado) {
+    if (raiz == NULL) {
+        nodoQuitado = NULL;
+        return raiz;
+    }
+    
+    if (nombre < raiz->nombre) {
+        raiz->izquierdo = quitarDeABB(raiz->izquierdo, nombre, nodoQuitado);
+    } else if (nombre > raiz->nombre) {
+        raiz->derecho = quitarDeABB(raiz->derecho, nombre, nodoQuitado);
+    } else {
+        // lo encontramos
+        nodoQuitado = raiz;
+        
+        if (raiz->izquierdo == NULL) {
+            return raiz->derecho;
+        } else if (raiz->derecho == NULL) {
+            return raiz->izquierdo;
+        }
+        
+        // tiene dos hijos buscar sucesor
+        NodoABB* sucesor = raiz->derecho;
+        NodoABB* padreSucesor = raiz;
+        
+        while (sucesor->izquierdo != NULL) {
+            padreSucesor = sucesor;
+            sucesor = sucesor->izquierdo;
+        }
+        
+        if (padreSucesor != raiz) {
+            padreSucesor->izquierdo = sucesor->derecho;
+            sucesor->derecho = raiz->derecho;
+        }
+        sucesor->izquierdo = raiz->izquierdo;
+        
+        nodoQuitado->izquierdo = NULL;
+        nodoQuitado->derecho = NULL;
+        
+        return sucesor;
+    }
+    
+    return raiz;
+}
+
+// eliminar del abb y liberar memoria
+NodoABB* eliminarDeABB(NodoABB* raiz, const string& nombre) {
+    NodoABB* nodoQuitado = NULL;
+    NodoABB* resultado = quitarDeABB(raiz, nombre, nodoQuitado);
+    if (nodoQuitado != NULL) {
+        delete nodoQuitado;
+    }
+    return resultado;
 }
 
 // listar en orden alfabetico
