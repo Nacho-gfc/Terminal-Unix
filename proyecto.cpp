@@ -1,9 +1,11 @@
 // Proyecto 2 - Terminal Unix
 // Sistema de archivos simulado
-// agregue mkdir y touch
+// agregue rm y rmdir para eliminar
 
 #include <iostream>
 #include <string>
+#include <cstdio>
+#include <cstring>
 
 using namespace std;
 
@@ -186,6 +188,65 @@ NodoABB* buscarPorRuta(SistemaArchivos& sistema, const string& ruta) {
     return buscarEnABB(dirPadre->hijoRaiz, nombreFinal);
 }
 
+void guardarNodoRecursivo(FILE* archivo, NodoABB* nodo, const string& rutaBase) {
+    if (nodo == NULL) return;
+    string rutaCompleta = rutaBase;
+    if (rutaBase != "/") rutaCompleta += "/";
+    rutaCompleta += nodo->nombre;
+    if (nodo->esDirectorio) {
+        fprintf(archivo, "DIR|%s|\n", rutaCompleta.c_str());
+        guardarNodoRecursivo(archivo, nodo->hijoRaiz, rutaCompleta);
+    } else {
+        fprintf(archivo, "FILE|%s|%s\n", rutaCompleta.c_str(), nodo->contenido.c_str());
+    }
+    guardarNodoRecursivo(archivo, nodo->izquierdo, rutaBase);
+    guardarNodoRecursivo(archivo, nodo->derecho, rutaBase);
+}
+
+void guardarEnArchivo(SistemaArchivos& sistema) {
+    FILE* archivo = fopen(sistema.archivoPersistencia.c_str(), "w");
+    if (archivo == NULL) {
+        cout << "error al guardar" << endl;
+        return;
+    }
+    if (sistema.raiz->hijoRaiz != NULL) {
+        guardarNodoRecursivo(archivo, sistema.raiz->hijoRaiz, "/");
+    }
+    fclose(archivo);
+}
+
+void cargarDesdeArchivo(SistemaArchivos& sistema) {
+    FILE* archivo = fopen(sistema.archivoPersistencia.c_str(), "r");
+    if (archivo == NULL) {
+        return;
+    }
+    char linea[1000];
+    while (fgets(linea, sizeof(linea), archivo)) {
+        linea[strcspn(linea, "\n")] = 0;
+        if (strlen(linea) == 0) continue;
+        char* tipo = strtok(linea, "|");
+        char* ruta = strtok(NULL, "|");
+        char* contenido = strtok(NULL, "|");
+        if (tipo == NULL || ruta == NULL) continue;
+        string rutaStr(ruta);
+        string contenidoStr = (contenido != NULL) ? string(contenido) : "";
+        bool esDir = (strcmp(tipo, "DIR") == 0);
+        size_t ultimaBarra = rutaStr.find_last_of('/');
+        if (ultimaBarra == string::npos) continue;
+        string rutaPadre = rutaStr.substr(0, ultimaBarra);
+        string nombreFinal = rutaStr.substr(ultimaBarra + 1);
+        if (rutaPadre.length() == 0) rutaPadre = "/";
+        NodoABB* padre = navegarRuta(sistema, rutaPadre);
+        if (padre == NULL) continue;
+        if (buscarEnABB(padre->hijoRaiz, nombreFinal) == NULL) {
+            NodoABB* nuevo = crearNodo(nombreFinal, esDir, contenidoStr);
+            nuevo->padre = padre;
+            padre->hijoRaiz = insertarEnABB(padre->hijoRaiz, nuevo);
+        }
+    }
+    fclose(archivo);
+}
+
 void inicializarSistema(SistemaArchivos& sistema, const string& archivoConfig) {
     sistema.archivoPersistencia = archivoConfig;
     sistema.raiz = crearNodo("/", true);
@@ -223,47 +284,99 @@ void comandoCd(SistemaArchivos& sistema, const string& ruta) {
     sistema.actual = destino;
 }
 
-// comando mkdir para crear carpetas
 void comandoMkdir(SistemaArchivos& sistema, const string& ruta) {
     string rutaPadre, nombreCarpeta;
     separarRuta(ruta, rutaPadre, nombreCarpeta);
-    
     if (nombreCarpeta.length() == 0) {
         cout << "mkdir: falta el nombre" << endl;
         return;
     }
-    
     NodoABB* dirPadre;
     if (rutaPadre.length() == 0) {
         dirPadre = sistema.actual;
     } else {
         dirPadre = navegarRuta(sistema, rutaPadre);
     }
-    
     if (dirPadre == NULL) {
         cout << "mkdir: ruta no existe" << endl;
         return;
     }
-    
     if (buscarEnABB(dirPadre->hijoRaiz, nombreCarpeta) != NULL) {
         cout << "mkdir: ya existe " << nombreCarpeta << endl;
         return;
     }
-    
     NodoABB* nuevaCarpeta = crearNodo(nombreCarpeta, true);
     nuevaCarpeta->padre = dirPadre;
     dirPadre->hijoRaiz = insertarEnABB(dirPadre->hijoRaiz, nuevaCarpeta);
 }
 
-// comando touch para crear archivos
 void comandoTouch(SistemaArchivos& sistema, const string& ruta) {
     string rutaPadre, nombreArchivo;
     separarRuta(ruta, rutaPadre, nombreArchivo);
-    
     if (nombreArchivo.length() == 0) {
         cout << "touch: falta el nombre" << endl;
         return;
     }
+    NodoABB* dirPadre;
+    if (rutaPadre.length() == 0) {
+        dirPadre = sistema.actual;
+    } else {
+        dirPadre = navegarRuta(sistema, rutaPadre);
+    }
+    if (dirPadre == NULL) {
+        cout << "touch: ruta no existe" << endl;
+        return;
+    }
+    if (buscarEnABB(dirPadre->hijoRaiz, nombreArchivo) != NULL) {
+        cout << "touch: ya existe " << nombreArchivo << endl;
+        return;
+    }
+    NodoABB* nuevoArchivo = crearNodo(nombreArchivo, false);
+    nuevoArchivo->padre = dirPadre;
+    dirPadre->hijoRaiz = insertarEnABB(dirPadre->hijoRaiz, nuevoArchivo);
+}
+
+void comandoMv(SistemaArchivos& sistema, const string& origen, const string& destino) {
+    NodoABB* nodoOrigen = buscarPorRuta(sistema, origen);
+    if (nodoOrigen == NULL) {
+        cout << "mv: no existe " << origen << endl;
+        return;
+    }
+    NodoABB* padreOrigen = nodoOrigen->padre;
+    string rutaPadreDestino, nombreDestino;
+    separarRuta(destino, rutaPadreDestino, nombreDestino);
+    NodoABB* padreDestino;
+    if (rutaPadreDestino.length() == 0) {
+        padreDestino = sistema.actual;
+    } else {
+        padreDestino = navegarRuta(sistema, rutaPadreDestino);
+    }
+    if (padreDestino == NULL) {
+        cout << "mv: ruta destino no existe" << endl;
+        return;
+    }
+    if (buscarEnABB(padreDestino->hijoRaiz, nombreDestino) != NULL) {
+        cout << "mv: ya existe " << nombreDestino << endl;
+        return;
+    }
+    if (padreOrigen == padreDestino) {
+        nodoOrigen->nombre = nombreDestino;
+    } else {
+        string nombreViejo = nodoOrigen->nombre;
+        NodoABB* nodoMovido = NULL;
+        padreOrigen->hijoRaiz = quitarDeABB(padreOrigen->hijoRaiz, nombreViejo, nodoMovido);
+        if (nodoMovido != NULL) {
+            nodoMovido->nombre = nombreDestino;
+            nodoMovido->padre = padreDestino;
+            padreDestino->hijoRaiz = insertarEnABB(padreDestino->hijoRaiz, nodoMovido);
+        }
+    }
+}
+
+// comando rm para eliminar archivos
+void comandoRm(SistemaArchivos& sistema, const string& ruta) {
+    string rutaPadre, nombreArchivo;
+    separarRuta(ruta, rutaPadre, nombreArchivo);
     
     NodoABB* dirPadre;
     if (rutaPadre.length() == 0) {
@@ -273,31 +386,75 @@ void comandoTouch(SistemaArchivos& sistema, const string& ruta) {
     }
     
     if (dirPadre == NULL) {
-        cout << "touch: ruta no existe" << endl;
+        cout << "rm: ruta no existe" << endl;
         return;
     }
     
-    if (buscarEnABB(dirPadre->hijoRaiz, nombreArchivo) != NULL) {
-        cout << "touch: ya existe " << nombreArchivo << endl;
+    NodoABB* nodo = buscarEnABB(dirPadre->hijoRaiz, nombreArchivo);
+    
+    if (nodo == NULL) {
+        cout << "rm: no existe " << nombreArchivo << endl;
         return;
     }
     
-    NodoABB* nuevoArchivo = crearNodo(nombreArchivo, false);
-    nuevoArchivo->padre = dirPadre;
-    dirPadre->hijoRaiz = insertarEnABB(dirPadre->hijoRaiz, nuevoArchivo);
+    if (nodo->esDirectorio) {
+        cout << "rm: es una carpeta " << nombreArchivo << endl;
+        return;
+    }
+    
+    dirPadre->hijoRaiz = eliminarDeABB(dirPadre->hijoRaiz, nombreArchivo);
+}
+
+// comando rmdir para eliminar carpetas vacias
+void comandoRmdir(SistemaArchivos& sistema, const string& ruta) {
+    string rutaPadre, nombreCarpeta;
+    separarRuta(ruta, rutaPadre, nombreCarpeta);
+    
+    NodoABB* dirPadre;
+    if (rutaPadre.length() == 0) {
+        dirPadre = sistema.actual;
+    } else {
+        dirPadre = navegarRuta(sistema, rutaPadre);
+    }
+    
+    if (dirPadre == NULL) {
+        cout << "rmdir: ruta no existe" << endl;
+        return;
+    }
+    
+    NodoABB* nodo = buscarEnABB(dirPadre->hijoRaiz, nombreCarpeta);
+    
+    if (nodo == NULL) {
+        cout << "rmdir: no existe " << nombreCarpeta << endl;
+        return;
+    }
+    
+    if (!nodo->esDirectorio) {
+        cout << "rmdir: no es carpeta " << nombreCarpeta << endl;
+        return;
+    }
+    
+    if (nodo->hijoRaiz != NULL) {
+        cout << "rmdir: carpeta no vacia " << nombreCarpeta << endl;
+        return;
+    }
+    
+    dirPadre->hijoRaiz = eliminarDeABB(dirPadre->hijoRaiz, nombreCarpeta);
 }
 
 int main() {
     SistemaArchivos sistema;
     inicializarSistema(sistema, "filesystem.txt");
+    cargarDesdeArchivo(sistema);
     
-    string comando, parametro1;
+    string comando, parametro1, parametro2;
     
     while (true) {
         cout << obtenerRutaCompleta(sistema.actual) << "$ ";
         cin >> comando;
         
         if (comando == "exit") {
+            guardarEnArchivo(sistema);
             break;
         }
         else if (comando == "ls") {
@@ -320,6 +477,18 @@ int main() {
         else if (comando == "touch") {
             cin >> parametro1;
             comandoTouch(sistema, parametro1);
+        }
+        else if (comando == "mv") {
+            cin >> parametro1 >> parametro2;
+            comandoMv(sistema, parametro1, parametro2);
+        }
+        else if (comando == "rm") {
+            cin >> parametro1;
+            comandoRm(sistema, parametro1);
+        }
+        else if (comando == "rmdir") {
+            cin >> parametro1;
+            comandoRmdir(sistema, parametro1);
         }
         else {
             cout << "comando no encontrado" << endl;
