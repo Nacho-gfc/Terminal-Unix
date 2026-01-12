@@ -1,6 +1,6 @@
 // Proyecto 2 - Terminal Unix
 // Sistema de archivos simulado
-// agregue rm y rmdir para eliminar
+// version final con cat edit y write
 
 #include <iostream>
 #include <string>
@@ -373,73 +373,117 @@ void comandoMv(SistemaArchivos& sistema, const string& origen, const string& des
     }
 }
 
-// comando rm para eliminar archivos
 void comandoRm(SistemaArchivos& sistema, const string& ruta) {
     string rutaPadre, nombreArchivo;
     separarRuta(ruta, rutaPadre, nombreArchivo);
-    
     NodoABB* dirPadre;
     if (rutaPadre.length() == 0) {
         dirPadre = sistema.actual;
     } else {
         dirPadre = navegarRuta(sistema, rutaPadre);
     }
-    
     if (dirPadre == NULL) {
         cout << "rm: ruta no existe" << endl;
         return;
     }
-    
     NodoABB* nodo = buscarEnABB(dirPadre->hijoRaiz, nombreArchivo);
-    
     if (nodo == NULL) {
         cout << "rm: no existe " << nombreArchivo << endl;
         return;
     }
-    
     if (nodo->esDirectorio) {
         cout << "rm: es una carpeta " << nombreArchivo << endl;
         return;
     }
-    
     dirPadre->hijoRaiz = eliminarDeABB(dirPadre->hijoRaiz, nombreArchivo);
 }
 
-// comando rmdir para eliminar carpetas vacias
 void comandoRmdir(SistemaArchivos& sistema, const string& ruta) {
     string rutaPadre, nombreCarpeta;
     separarRuta(ruta, rutaPadre, nombreCarpeta);
-    
     NodoABB* dirPadre;
     if (rutaPadre.length() == 0) {
         dirPadre = sistema.actual;
     } else {
         dirPadre = navegarRuta(sistema, rutaPadre);
     }
-    
     if (dirPadre == NULL) {
         cout << "rmdir: ruta no existe" << endl;
         return;
     }
-    
     NodoABB* nodo = buscarEnABB(dirPadre->hijoRaiz, nombreCarpeta);
-    
     if (nodo == NULL) {
         cout << "rmdir: no existe " << nombreCarpeta << endl;
         return;
     }
-    
     if (!nodo->esDirectorio) {
         cout << "rmdir: no es carpeta " << nombreCarpeta << endl;
         return;
     }
-    
     if (nodo->hijoRaiz != NULL) {
         cout << "rmdir: carpeta no vacia " << nombreCarpeta << endl;
         return;
     }
-    
     dirPadre->hijoRaiz = eliminarDeABB(dirPadre->hijoRaiz, nombreCarpeta);
+}
+
+// comando cat para mostrar contenido de archivo
+void comandoCat(SistemaArchivos& sistema, const string& ruta) {
+    NodoABB* nodo = buscarPorRuta(sistema, ruta);
+    
+    if (nodo == NULL) {
+        cout << "cat: no existe " << ruta << endl;
+        return;
+    }
+    
+    if (nodo->esDirectorio) {
+        cout << "cat: es una carpeta" << endl;
+        return;
+    }
+    
+    cout << nodo->contenido << endl;
+}
+
+// comando edit para editar contenido de forma interactiva
+void comandoEdit(SistemaArchivos& sistema, const string& ruta) {
+    NodoABB* nodo = buscarPorRuta(sistema, ruta);
+    
+    if (nodo == NULL) {
+        cout << "edit: no existe " << ruta << endl;
+        return;
+    }
+    
+    if (nodo->esDirectorio) {
+        cout << "edit: es una carpeta" << endl;
+        return;
+    }
+    
+    cin.ignore();
+    
+    cout << "escribe el contenido: ";
+    string nuevoContenido;
+    getline(cin, nuevoContenido);
+    
+    nodo->contenido = nuevoContenido;
+    cout << "guardado" << endl;
+}
+
+// comando write para escribir contenido directamente
+void comandoWrite(SistemaArchivos& sistema, const string& ruta, const string& texto) {
+    NodoABB* nodo = buscarPorRuta(sistema, ruta);
+    
+    if (nodo == NULL) {
+        cout << "write: no existe " << ruta << endl;
+        return;
+    }
+    
+    if (nodo->esDirectorio) {
+        cout << "write: es una carpeta" << endl;
+        return;
+    }
+    
+    nodo->contenido = texto;
+    cout << "guardado" << endl;
 }
 
 int main() {
@@ -489,6 +533,27 @@ int main() {
         else if (comando == "rmdir") {
             cin >> parametro1;
             comandoRmdir(sistema, parametro1);
+        }
+        else if (comando == "cat") {
+            cin >> parametro1;
+            comandoCat(sistema, parametro1);
+        }
+        else if (comando == "edit") {
+            cin >> parametro1;
+            comandoEdit(sistema, parametro1);
+        }
+        else if (comando == "write") {
+            cin >> parametro1;
+            string linea;
+            getline(cin, linea);
+            size_t inicio = linea.find('"');
+            size_t fin = linea.find_last_of('"');
+            if (inicio != string::npos && fin != string::npos && inicio != fin) {
+                string texto = linea.substr(inicio + 1, fin - inicio - 1);
+                comandoWrite(sistema, parametro1, texto);
+            } else {
+                cout << "write: usa comillas para el texto" << endl;
+            }
         }
         else {
             cout << "comando no encontrado" << endl;
